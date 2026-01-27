@@ -33,6 +33,17 @@ type Settings struct {
 	Value string `json:"value"`
 }
 
+type ApiKey struct {
+	ID         int64      `json:"id"`
+	Name       string     `json:"name"`
+	KeyHash    string     `json:"-"`
+	KeyPrefix  string     `json:"key_prefix"`
+	KeySuffix  string     `json:"key_suffix"`
+	Enabled    bool       `json:"enabled"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
 type Store struct {
 	db *sql.DB
 	mu sync.RWMutex
@@ -76,7 +87,19 @@ func (s *Store) migrate() error {
 			key TEXT UNIQUE NOT NULL,
 			value TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS api_keys (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			key_hash TEXT NOT NULL UNIQUE,
+			key_prefix TEXT NOT NULL DEFAULT 'sk-',
+			key_suffix TEXT NOT NULL,
+			enabled INTEGER DEFAULT 1,
+			last_used_at DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_accounts_enabled ON accounts(enabled)`,
+		`CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys(key_hash)`,
+		`CREATE INDEX IF NOT EXISTS idx_api_keys_enabled ON api_keys(enabled)`,
 	}
 
 	for _, q := range queries {
@@ -252,4 +275,147 @@ func (s *Store) SetSetting(key, value string) error {
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value
 	`, key, value)
 	return err
+}
+
+func (s *Store) CreateApiKey(key *ApiKey) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(`
+		INSERT INTO api_keys (name, key_hash, key_prefix, key_suffix, enabled)
+		VALUES (?, ?, ?, ?, ?)
+	`, key.Name, key.KeyHash, key.KeyPrefix, key.KeySuffix, key.Enabled)
+	if err != nil {
+		return err
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return err
+	}
+	key.ID = id
+
+	var createdAt time.Time
+	var lastUsedAt sql.NullTime
+	if err := s.db.QueryRow(`
+		SELECT enabled, last_used_at, created_at
+		FROM api_keys WHERE id = ?
+	`, id).Scan(&key.Enabled, &lastUsedAt, &createdAt); err != nil {
+		return err
+	}
+	if lastUsedAt.Valid {
+		t := lastUsedAt.Time
+		key.LastUsedAt = &t
+	} else {
+		key.LastUsedAt = nil
+	}
+	key.CreatedAt = createdAt
+
+	return nil
+}
+
+func (s *Store) ListApiKeys() ([]*ApiKey, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id, name, key_prefix, key_suffix, enabled, last_used_at, created_at
+		FROM api_keys ORDER BY id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var keys []*ApiKey
+	for rows.Next() {
+		key := &ApiKey{}
+		var lastUsedAt sql.NullTime
+		if err := rows.Scan(&key.ID, &key.Name, &key.KeyPrefix, &key.KeySuffix, &key.Enabled, &lastUsedAt, &key.CreatedAt); err != nil {
+			return nil, err
+		}
+		if lastUsedAt.Valid {
+			t := lastUsedAt.Time
+			key.LastUsedAt = &t
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return keys, nil
+}
+
+func (s *Store) GetApiKeyByHash(hash string) (*ApiKey, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	key := &ApiKey{}
+	var lastUsedAt sql.NullTime
+	err := s.db.QueryRow(`
+		SELECT id, name, key_hash, key_prefix, key_suffix, enabled, last_used_at, created_at
+		FROM api_keys WHERE key_hash = ?
+	`, hash).Scan(&key.ID, &key.Name, &key.KeyHash, &key.KeyPrefix, &key.KeySuffix, &key.Enabled, &lastUsedAt, &key.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if lastUsedAt.Valid {
+		t := lastUsedAt.Time
+		key.LastUsedAt = &t
+	}
+	return key, nil
+}
+
+func (s *Store) UpdateApiKeyEnabled(id int64, enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(`
+		UPDATE api_keys SET enabled = ?
+		WHERE id = ?
+	`, enabled, id)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) UpdateApiKeyLastUsed(id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, id)
+	return err
+}
+
+func (s *Store) DeleteApiKey(id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec("DELETE FROM api_keys WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }

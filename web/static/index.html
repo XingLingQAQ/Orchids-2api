@@ -261,6 +261,81 @@
       .empty-state p {
         margin-bottom: 16px;
       }
+      /* Tabs */
+      .tabs {
+        display: flex;
+        background: rgba(255, 255, 255, 0.05);
+        padding: 4px;
+        border-radius: 12px;
+        width: fit-content;
+        margin-bottom: 24px;
+      }
+      .tab-btn {
+        padding: 10px 24px;
+        border-radius: 8px;
+        color: #a1a1aa;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        font-weight: 500;
+        font-size: 0.875rem;
+        transition: all 0.2s;
+      }
+      .tab-btn.active {
+        background: linear-gradient(90deg, #06b6d4, #8b5cf6);
+        color: white;
+      }
+      .tab-btn:hover:not(.active) {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .tab-content {
+        display: none;
+      }
+      .tab-content.active {
+        display: block;
+      }
+      /* Toast */
+      .toast-container {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        z-index: 2000;
+      }
+      .toast {
+        background: #1e1e2e;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 12px 20px;
+        margin-top: 8px;
+        color: #e4e4e7;
+        font-size: 0.875rem;
+        animation: slideIn 0.3s ease;
+      }
+      .toast.success { border-left: 3px solid #22c55e; }
+      .toast.error { border-left: 3px solid #ef4444; }
+      @keyframes slideIn {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+      /* Key Display */
+      .key-display {
+        background: rgba(0,0,0,0.3);
+        padding: 16px;
+        border-radius: 8px;
+        font-family: monospace;
+        word-break: break-all;
+        color: #22c55e;
+        border: 1px dashed rgba(255,255,255,0.2);
+      }
+      .warning-box {
+        background: rgba(234, 179, 8, 0.1);
+        border: 1px solid rgba(234, 179, 8, 0.3);
+        border-radius: 8px;
+        padding: 12px;
+        color: #eab308;
+        font-size: 0.875rem;
+        margin-top: 16px;
+      }
     </style>
   </head>
   <body>
@@ -286,37 +361,123 @@
       </div>
 
       <div class="card">
-        <div class="card-header">
-          <h2 class="card-title">账号管理</h2>
-          <div class="actions">
-            <button class="btn btn-primary" onclick="exportAccounts()">
-              导出
-            </button>
-            <button
-              class="btn btn-primary"
-              onclick="document.getElementById('importFile').click()"
-            >
-              导入
-            </button>
-            <input
-              type="file"
-              id="importFile"
-              accept=".json"
-              style="display: none"
-              onchange="importAccounts(event)"
-            />
-            <button class="btn btn-primary" onclick="openModal()">
-              添加账号
-            </button>
+        <!-- Tab 导航 -->
+        <div class="tabs">
+          <button class="tab-btn active" onclick="switchTab('accounts')">账号管理</button>
+          <button class="tab-btn" onclick="switchTab('keys')">API-Key 管理</button>
+        </div>
+
+        <!-- 账号管理 Tab -->
+        <div id="accountsTab" class="tab-content active">
+          <div class="card-header">
+            <h2 class="card-title">账号列表</h2>
+            <div class="actions">
+              <button class="btn btn-primary" onclick="exportAccounts()">
+                导出
+              </button>
+              <button
+                class="btn btn-primary"
+                onclick="document.getElementById('importFile').click()"
+              >
+                导入
+              </button>
+              <input
+                type="file"
+                id="importFile"
+                accept=".json"
+                style="display: none"
+                onchange="importAccounts(event)"
+              />
+              <button class="btn btn-primary" onclick="openModal()">
+                添加账号
+              </button>
+            </div>
+          </div>
+          <div id="accountsList">
+            <div class="empty-state">
+              <p>暂无账号，点击上方按钮添加</p>
+            </div>
           </div>
         </div>
-        <div id="accountsList">
-          <div class="empty-state">
-            <p>暂无账号，点击上方按钮添加</p>
+
+        <!-- API-Key 管理 Tab -->
+        <div id="keysTab" class="tab-content">
+          <div class="card-header">
+            <h2 class="card-title">API Keys</h2>
+            <div class="actions">
+              <button class="btn btn-primary" onclick="openCreateKeyModal()">
+                创建 Key
+              </button>
+            </div>
+          </div>
+          <div id="keysList">
+            <div class="empty-state">
+              <p>暂无 API Key，点击上方按钮创建</p>
+            </div>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- 创建 Key 弹窗 -->
+    <div class="modal" id="createKeyModal">
+      <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-header">
+          <h3 class="modal-title">创建 API Key</h3>
+          <button class="modal-close" onclick="closeCreateKeyModal()">&times;</button>
+        </div>
+        <form onsubmit="createApiKey(event)">
+          <div class="form-group">
+            <label class="form-label">名称 / 备注</label>
+            <input type="text" class="form-input" id="keyName" required placeholder="例如：生产环境、测试用" />
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 16px;">
+            创建
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Key 展示弹窗 -->
+    <div class="modal" id="showKeyModal">
+      <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+          <h3 class="modal-title">API Key 已创建</h3>
+        </div>
+        <p style="color: #a1a1aa; margin-bottom: 16px;">请立即复制并保存您的 API Key：</p>
+        <div class="key-display" id="fullKeyDisplay"></div>
+        <div class="warning-box">
+          <strong>⚠️ 请妥善保存</strong><br>
+          关闭此窗口后将无法再次查看完整 Key
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 20px;">
+          <button class="btn btn-primary" style="flex: 1;" onclick="copyNewKey()">复制 Key</button>
+          <button class="btn" style="flex: 1; background: rgba(255,255,255,0.1); color: white;" onclick="closeShowKeyModal()">我已保存，关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 删除 Key 确认弹窗 -->
+    <div class="modal" id="deleteKeyModal">
+      <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-header">
+          <h3 class="modal-title">删除 API Key</h3>
+          <button class="modal-close" onclick="closeDeleteKeyModal()">&times;</button>
+        </div>
+        <p style="margin-bottom: 20px;">
+          确定要删除 Key「<strong id="deleteKeyName"></strong>」吗？<br>
+          <span style="color: #ef4444;">此操作不可撤销，使用此 Key 的应用将无法访问。</span>
+        </p>
+        <input type="hidden" id="deleteKeyId" />
+        <div style="display: flex; gap: 8px;">
+          <button class="btn" style="flex: 1; background: rgba(255,255,255,0.1); color: white;" onclick="closeDeleteKeyModal()">取消</button>
+          <button class="btn btn-danger" style="flex: 1;" onclick="confirmDeleteKey()">删除</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast 容器 -->
+    <div class="toast-container" id="toastContainer"></div>
 
     <div class="modal" id="accountModal">
       <div class="modal-content">
@@ -585,6 +746,179 @@
       }
 
       document.addEventListener("DOMContentLoaded", loadAccounts);
+
+      // ========== Tab 切换 ==========
+      function switchTab(tabName) {
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+        document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
+        document.getElementById(tabName + 'Tab').classList.add('active');
+
+        if (tabName === 'keys') {
+          loadApiKeys();
+        }
+      }
+
+      // ========== API Keys 管理 ==========
+      let apiKeys = [];
+      let newKeyValue = '';
+
+      async function loadApiKeys() {
+        try {
+          const res = await fetch('/api/keys');
+          if (!res.ok) throw new Error('加载失败');
+          apiKeys = await res.json() || [];
+          renderApiKeys();
+        } catch (err) {
+          showToast('加载 API Keys 失败: ' + err.message, 'error');
+        }
+      }
+
+      function renderApiKeys() {
+        const container = document.getElementById('keysList');
+        if (!apiKeys || apiKeys.length === 0) {
+          container.innerHTML = '<div class="empty-state"><p>暂无 API Key，点击上方按钮创建</p></div>';
+          return;
+        }
+
+        container.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>名称</th>
+                <th>Key</th>
+                <th>状态</th>
+                <th>最后使用</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${apiKeys.map(k => `
+                <tr>
+                  <td>${escapeHtml(k.name)}</td>
+                  <td style="font-family: monospace; color: #a1a1aa;">${k.key_prefix}****...${k.key_suffix}</td>
+                  <td>
+                    <label class="toggle" style="transform: scale(0.8);">
+                      <input type="checkbox" ${k.enabled ? 'checked' : ''} onchange="toggleKeyStatus(${k.id}, this.checked)">
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </td>
+                  <td style="color: #a1a1aa; font-size: 0.85rem;">${k.last_used_at ? formatTime(k.last_used_at) : '从未使用'}</td>
+                  <td>
+                    <button class="btn btn-danger btn-sm" onclick="openDeleteKeyModal(${k.id}, '${escapeHtml(k.name)}')">删除</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      }
+
+      function formatTime(isoString) {
+        const date = new Date(isoString);
+        const now = new Date();
+        const diff = (now - date) / 1000;
+        if (diff < 60) return '刚刚';
+        if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+        if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+        return Math.floor(diff / 86400) + ' 天前';
+      }
+
+      function openCreateKeyModal() {
+        document.getElementById('keyName').value = '';
+        document.getElementById('createKeyModal').classList.add('active');
+      }
+
+      function closeCreateKeyModal() {
+        document.getElementById('createKeyModal').classList.remove('active');
+      }
+
+      async function createApiKey(e) {
+        e.preventDefault();
+        const name = document.getElementById('keyName').value.trim();
+        if (!name) return;
+
+        try {
+          const res = await fetch('/api/keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+          });
+          if (!res.ok) throw new Error(await res.text());
+          const data = await res.json();
+
+          closeCreateKeyModal();
+          newKeyValue = data.key;
+          document.getElementById('fullKeyDisplay').textContent = data.key;
+          document.getElementById('showKeyModal').classList.add('active');
+          loadApiKeys();
+        } catch (err) {
+          showToast('创建失败: ' + err.message, 'error');
+        }
+      }
+
+      function closeShowKeyModal() {
+        document.getElementById('showKeyModal').classList.remove('active');
+        newKeyValue = '';
+      }
+
+      async function copyNewKey() {
+        try {
+          await navigator.clipboard.writeText(newKeyValue);
+          showToast('已复制到剪贴板', 'success');
+        } catch (err) {
+          showToast('复制失败', 'error');
+        }
+      }
+
+      async function toggleKeyStatus(id, enabled) {
+        try {
+          const res = await fetch(`/api/keys/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+          });
+          if (!res.ok) throw new Error(await res.text());
+          showToast(enabled ? 'Key 已启用' : 'Key 已禁用', 'success');
+        } catch (err) {
+          showToast('操作失败: ' + err.message, 'error');
+          loadApiKeys();
+        }
+      }
+
+      function openDeleteKeyModal(id, name) {
+        document.getElementById('deleteKeyId').value = id;
+        document.getElementById('deleteKeyName').textContent = name;
+        document.getElementById('deleteKeyModal').classList.add('active');
+      }
+
+      function closeDeleteKeyModal() {
+        document.getElementById('deleteKeyModal').classList.remove('active');
+      }
+
+      async function confirmDeleteKey() {
+        const id = document.getElementById('deleteKeyId').value;
+        try {
+          const res = await fetch(`/api/keys/${id}`, { method: 'DELETE' });
+          if (!res.ok && res.status !== 204) throw new Error(await res.text());
+          closeDeleteKeyModal();
+          showToast('已删除', 'success');
+          loadApiKeys();
+        } catch (err) {
+          showToast('删除失败: ' + err.message, 'error');
+        }
+      }
+
+      // ========== Toast ==========
+      function showToast(message, type = 'success') {
+        const container = document.getElementById('toastContainer');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+      }
     </script>
   </body>
 </html>

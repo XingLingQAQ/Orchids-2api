@@ -1,8 +1,14 @@
 package api
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,15 +23,29 @@ type API struct {
 }
 
 type ExportData struct {
-	Version   int              `json:"version"`
-	ExportAt  time.Time        `json:"export_at"`
-	Accounts  []store.Account  `json:"accounts"`
+	Version  int             `json:"version"`
+	ExportAt time.Time       `json:"export_at"`
+	Accounts []store.Account `json:"accounts"`
 }
 
 type ImportResult struct {
 	Total    int `json:"total"`
 	Imported int `json:"imported"`
 	Skipped  int `json:"skipped"`
+}
+
+type CreateKeyResponse struct {
+	ID        int64     `json:"id"`
+	Key       string    `json:"key"`
+	Name      string    `json:"name"`
+	KeyPrefix string    `json:"key_prefix"`
+	KeySuffix string    `json:"key_suffix"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type UpdateKeyRequest struct {
+	Enabled *bool `json:"enabled"`
 }
 
 func New(s *store.Store) *API {
@@ -35,6 +55,8 @@ func New(s *store.Store) *API {
 func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/accounts", a.HandleAccounts)
 	mux.HandleFunc("/api/accounts/", a.HandleAccountByID)
+	mux.HandleFunc("/api/keys", a.HandleKeys)
+	mux.HandleFunc("/api/keys/", a.HandleKeyByID)
 }
 
 func (a *API) HandleAccounts(w http.ResponseWriter, r *http.Request) {
@@ -206,4 +228,140 @@ func (a *API) HandleImport(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+func generateApiKey() (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+	b := make([]byte, 48)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			return "", err
+		}
+		b[i] = charset[n.Int64()]
+	}
+	return "sk-" + string(b), nil
+}
+
+func (a *API) HandleKeys(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		keys, err := a.store.ListApiKeys()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(keys)
+
+	case http.MethodPost:
+		var req struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		req.Name = strings.TrimSpace(req.Name)
+		if req.Name == "" {
+			http.Error(w, "name is required", http.StatusBadRequest)
+			return
+		}
+
+		fullKey, err := generateApiKey()
+		if err != nil {
+			http.Error(w, "failed to generate api key", http.StatusInternalServerError)
+			return
+		}
+
+		hash := sha256.Sum256([]byte(fullKey))
+		hashStr := hex.EncodeToString(hash[:])
+		key := store.ApiKey{
+			Name:      req.Name,
+			KeyHash:   hashStr,
+			KeyPrefix: "sk-",
+			KeySuffix: fullKey[len(fullKey)-4:],
+			Enabled:   true,
+		}
+		if err := a.store.CreateApiKey(&key); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(CreateKeyResponse{
+			ID:        key.ID,
+			Key:       fullKey,
+			Name:      key.Name,
+			KeyPrefix: key.KeyPrefix,
+			KeySuffix: key.KeySuffix,
+			Enabled:   key.Enabled,
+			CreatedAt: key.CreatedAt,
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *API) HandleKeyByID(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/keys/")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPatch:
+		var req UpdateKeyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Enabled == nil {
+			http.Error(w, "enabled is required", http.StatusBadRequest)
+			return
+		}
+
+		if err := a.store.UpdateApiKeyEnabled(id, *req.Enabled); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		keys, err := a.store.ListApiKeys()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		for _, k := range keys {
+			if k.ID == id {
+				json.NewEncoder(w).Encode(k)
+				return
+			}
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+
+	case http.MethodDelete:
+		if err := a.store.DeleteApiKey(id); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }

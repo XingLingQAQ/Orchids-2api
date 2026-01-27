@@ -68,10 +68,16 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/v1/messages", h.HandleMessages)
+	if cfg.ApiKeysEnabled {
+		mux.HandleFunc("/v1/messages", middleware.ApiKeyAuth(s, h.HandleMessages))
+	} else {
+		mux.HandleFunc("/v1/messages", h.HandleMessages)
+	}
 
 	mux.HandleFunc("/api/accounts", middleware.BasicAuth(cfg.AdminUser, cfg.AdminPass, apiHandler.HandleAccounts))
 	mux.HandleFunc("/api/accounts/", middleware.BasicAuth(cfg.AdminUser, cfg.AdminPass, apiHandler.HandleAccountByID))
+	mux.HandleFunc("/api/keys", middleware.BasicAuth(cfg.AdminUser, cfg.AdminPass, apiHandler.HandleKeys))
+	mux.HandleFunc("/api/keys/", middleware.BasicAuth(cfg.AdminUser, cfg.AdminPass, apiHandler.HandleKeyByID))
 	mux.HandleFunc("/api/export", middleware.BasicAuth(cfg.AdminUser, cfg.AdminPass, apiHandler.HandleExport))
 	mux.HandleFunc("/api/import", middleware.BasicAuth(cfg.AdminUser, cfg.AdminPass, apiHandler.HandleImport))
 
