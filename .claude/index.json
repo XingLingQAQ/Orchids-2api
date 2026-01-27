@@ -1,0 +1,147 @@
+{
+  "timestamp": "2026-01-27T12:56:39+00:00",
+  "project": {
+    "name": "Orchids-2api",
+    "description": "Go 语言编写的 API 代理服务器，提供多账号管理与负载均衡代理功能",
+    "language": "Go",
+    "goVersion": "1.22"
+  },
+  "rootClaude": "./CLAUDE.md",
+  "modules": [
+    {
+      "path": "cmd/server",
+      "name": "server",
+      "description": "应用入口，路由配置，服务启动",
+      "entry": "cmd/server/main.go",
+      "interfaces": ["/v1/messages", "/api/accounts", "/api/export", "/api/import", "/health", "/admin"],
+      "tests": [],
+      "importantFiles": ["cmd/server/main.go"]
+    },
+    {
+      "path": "internal/api",
+      "name": "api",
+      "description": "账号管理 REST API (CRUD、导入导出)",
+      "entry": "internal/api/api.go",
+      "interfaces": ["HandleAccounts", "HandleAccountByID", "HandleExport", "HandleImport"],
+      "tests": [],
+      "importantFiles": ["internal/api/api.go"]
+    },
+    {
+      "path": "internal/handler",
+      "name": "handler",
+      "description": "主请求处理器，SSE 流式响应转换",
+      "entry": "internal/handler/handler.go",
+      "interfaces": ["HandleMessages"],
+      "tests": [],
+      "importantFiles": ["internal/handler/handler.go"]
+    },
+    {
+      "path": "internal/loadbalancer",
+      "name": "loadbalancer",
+      "description": "加权随机负载均衡算法",
+      "entry": "internal/loadbalancer/loadbalancer.go",
+      "interfaces": ["GetNextAccount", "GetNextAccountExcluding"],
+      "tests": [],
+      "importantFiles": ["internal/loadbalancer/loadbalancer.go"]
+    },
+    {
+      "path": "internal/store",
+      "name": "store",
+      "description": "SQLite 数据库层，账号持久化",
+      "entry": "internal/store/store.go",
+      "interfaces": ["CreateAccount", "UpdateAccount", "DeleteAccount", "GetAccount", "ListAccounts", "GetEnabledAccounts"],
+      "tests": [],
+      "dataModels": ["Account", "Settings"],
+      "importantFiles": ["internal/store/store.go"]
+    },
+    {
+      "path": "internal/config",
+      "name": "config",
+      "description": "环境变量配置加载",
+      "entry": "internal/config/config.go",
+      "interfaces": ["Load", "GetCookies"],
+      "tests": [],
+      "importantFiles": ["internal/config/config.go"]
+    },
+    {
+      "path": "internal/client",
+      "name": "client",
+      "description": "上游 API 客户端，Clerk 认证",
+      "entry": "internal/client/client.go",
+      "interfaces": ["GetToken", "SendRequest"],
+      "tests": [],
+      "importantFiles": ["internal/client/client.go"]
+    },
+    {
+      "path": "internal/middleware",
+      "name": "middleware",
+      "description": "HTTP Basic Auth 中间件",
+      "entry": "internal/middleware/auth.go",
+      "interfaces": ["BasicAuth", "BasicAuthHandler"],
+      "tests": [],
+      "importantFiles": ["internal/middleware/auth.go"]
+    },
+    {
+      "path": "internal/clerk",
+      "name": "clerk",
+      "description": "Clerk 认证服务集成",
+      "entry": "internal/clerk/clerk.go",
+      "interfaces": ["FetchAccountInfo"],
+      "tests": [],
+      "importantFiles": ["internal/clerk/clerk.go"]
+    },
+    {
+      "path": "internal/prompt",
+      "name": "prompt",
+      "description": "Claude 消息到 Markdown 的转换",
+      "entry": "internal/prompt/prompt.go",
+      "interfaces": ["BuildPromptV2", "FormatMessagesAsMarkdown"],
+      "tests": [],
+      "importantFiles": ["internal/prompt/prompt.go"]
+    },
+    {
+      "path": "internal/tiktoken",
+      "name": "tiktoken",
+      "description": "Token 计数估算",
+      "entry": "internal/tiktoken/tokenizer.go",
+      "interfaces": ["EstimateTokens", "EstimateTextTokens", "EstimateChineseTokens", "IsCJK"],
+      "tests": ["internal/tiktoken/tokenizer_test.go"],
+      "importantFiles": ["internal/tiktoken/tokenizer.go", "internal/tiktoken/tokenizer_test.go"]
+    },
+    {
+      "path": "internal/debug",
+      "name": "debug",
+      "description": "调试日志记录",
+      "entry": "internal/debug/logger.go",
+      "interfaces": ["New", "CleanupAllLogs", "LogIncomingRequest", "LogConvertedPrompt", "LogUpstreamRequest", "LogUpstreamSSE", "LogOutputSSE", "LogSummary"],
+      "tests": [],
+      "importantFiles": ["internal/debug/logger.go"]
+    },
+    {
+      "path": "web",
+      "name": "web",
+      "description": "静态资源嵌入与管理界面",
+      "entry": "web/embed.go",
+      "interfaces": ["StaticHandler"],
+      "tests": [],
+      "importantFiles": ["web/embed.go", "web/static/index.html"]
+    }
+  ],
+  "coverage": {
+    "totalFiles": 20,
+    "scannedFiles": 20,
+    "percentage": 100,
+    "byLanguage": {
+      "go": 15,
+      "html": 1,
+      "md": 4
+    }
+  },
+  "gaps": [],
+  "ignored": {
+    "directories": [".git", "data", "debug-logs", "vendor"],
+    "patterns": ["*.exe", "*.dll", "*.so", "*.dylib", "*.db", "*.sqlite", "*.log"]
+  },
+  "truncated": false,
+  "nextSteps": []
+}
