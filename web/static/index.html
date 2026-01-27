@@ -421,15 +421,15 @@
 
     <!-- 创建 Key 弹窗 -->
     <div class="modal" id="createKeyModal">
-      <div class="modal-content" style="max-width: 400px;">
+      <div class="modal-content" style="max-width: 450px;">
         <div class="modal-header">
           <h3 class="modal-title">创建 API Key</h3>
           <button class="modal-close" onclick="closeCreateKeyModal()">&times;</button>
         </div>
         <form onsubmit="createApiKey(event)">
           <div class="form-group">
-            <label class="form-label">名称 / 备注</label>
-            <input type="text" class="form-input" id="keyName" required placeholder="例如：生产环境、测试用" />
+            <label class="form-label">名称 / 备注（支持换行批量创建）</label>
+            <textarea class="form-input" id="keyName" required placeholder="每行一个名称，例如：&#10;生产环境&#10;测试用&#10;开发者-张三" rows="4" style="resize: vertical;"></textarea>
           </div>
           <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 16px;">
             创建
@@ -440,18 +440,18 @@
 
     <!-- Key 展示弹窗 -->
     <div class="modal" id="showKeyModal">
-      <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-content" style="max-width: 550px;">
         <div class="modal-header">
           <h3 class="modal-title">API Key 已创建</h3>
         </div>
         <p style="color: #a1a1aa; margin-bottom: 16px;">请立即复制并保存您的 API Key：</p>
-        <div class="key-display" id="fullKeyDisplay"></div>
+        <div id="fullKeyDisplay" style="max-height: 300px; overflow-y: auto;"></div>
         <div class="warning-box">
-          <strong>⚠️ 请妥善保存</strong><br>
+          <strong>请妥善保存</strong><br>
           关闭此窗口后将无法再次查看完整 Key
         </div>
         <div style="display: flex; gap: 8px; margin-top: 20px;">
-          <button class="btn btn-primary" style="flex: 1;" onclick="copyNewKey()">复制 Key</button>
+          <button class="btn btn-primary" style="flex: 1;" onclick="copyAllKeys()">复制全部</button>
           <button class="btn" style="flex: 1; background: rgba(255,255,255,0.1); color: white;" onclick="closeShowKeyModal()">我已保存，关闭</button>
         </div>
       </div>
@@ -771,7 +771,7 @@
 
       // ========== API Keys 管理 ==========
       let apiKeys = [];
-      let newKeyValue = '';
+      let createdKeys = []; // 存储批量创建的 keys
 
       async function loadApiKeys() {
         try {
@@ -853,45 +853,87 @@
 
       async function createApiKey(e) {
         e.preventDefault();
-        const name = document.getElementById('keyName').value.trim();
-        if (!name) return;
+        const input = document.getElementById('keyName').value.trim();
+        if (!input) return;
+
+        // 按换行分割，过滤空行
+        const names = input.split('\n').map(n => n.trim()).filter(n => n);
+        if (names.length === 0) return;
 
         const submitBtn = e.target.querySelector('button[type="submit"]');
         const originalText = submitBtn.textContent;
         submitBtn.disabled = true;
-        submitBtn.textContent = '创建中...';
+        submitBtn.textContent = `创建中 (0/${names.length})...`;
 
-        try {
-          const res = await fetch('/api/keys', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name })
-          });
-          if (!res.ok) throw new Error(await res.text());
-          const data = await res.json();
+        createdKeys = [];
+        let successCount = 0;
+        let failCount = 0;
 
-          closeCreateKeyModal();
-          newKeyValue = data.key;
-          document.getElementById('fullKeyDisplay').textContent = data.key;
-          document.getElementById('showKeyModal').classList.add('active');
-          loadApiKeys();
-        } catch (err) {
-          showToast('创建失败: ' + err.message, 'error');
-        } finally {
-          submitBtn.disabled = false;
-          submitBtn.textContent = originalText;
+        for (let i = 0; i < names.length; i++) {
+          submitBtn.textContent = `创建中 (${i + 1}/${names.length})...`;
+          try {
+            const res = await fetch('/api/keys', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: names[i] })
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            createdKeys.push({ name: names[i], key: data.key });
+            successCount++;
+          } catch (err) {
+            createdKeys.push({ name: names[i], key: null, error: err.message });
+            failCount++;
+          }
         }
+
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+        closeCreateKeyModal();
+
+        // 显示结果
+        renderCreatedKeys();
+        document.getElementById('showKeyModal').classList.add('active');
+        loadApiKeys();
+
+        if (failCount > 0) {
+          showToast(`创建完成: ${successCount} 成功, ${failCount} 失败`, 'error');
+        } else {
+          showToast(`成功创建 ${successCount} 个 Key`, 'success');
+        }
+      }
+
+      function renderCreatedKeys() {
+        const container = document.getElementById('fullKeyDisplay');
+        container.innerHTML = createdKeys.map(k => {
+          if (k.key) {
+            return `<div class="key-display" style="margin-bottom: 8px;">
+              <div style="color: #a1a1aa; font-size: 0.75rem; margin-bottom: 4px;">${escapeHtml(k.name)}</div>
+              <div>${escapeHtml(k.key)}</div>
+            </div>`;
+          } else {
+            return `<div class="key-display" style="margin-bottom: 8px; border-color: #ef4444;">
+              <div style="color: #ef4444; font-size: 0.75rem;">${escapeHtml(k.name)} - 创建失败: ${escapeHtml(k.error)}</div>
+            </div>`;
+          }
+        }).join('');
       }
 
       function closeShowKeyModal() {
         document.getElementById('showKeyModal').classList.remove('active');
-        newKeyValue = '';
+        createdKeys = [];
       }
 
-      async function copyNewKey() {
+      async function copyAllKeys() {
+        const successKeys = createdKeys.filter(k => k.key);
+        if (successKeys.length === 0) {
+          showToast('没有可复制的 Key', 'error');
+          return;
+        }
+        const text = successKeys.map(k => `${k.name}: ${k.key}`).join('\n');
         try {
-          await navigator.clipboard.writeText(newKeyValue);
-          showToast('已复制到剪贴板', 'success');
+          await navigator.clipboard.writeText(text);
+          showToast(`已复制 ${successKeys.length} 个 Key`, 'success');
         } catch (err) {
           showToast('复制失败', 'error');
         }
