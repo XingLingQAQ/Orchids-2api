@@ -272,6 +272,7 @@ func (a *API) HandleKeys(w http.ResponseWriter, r *http.Request) {
 
 		fullKey, err := generateApiKey()
 		if err != nil {
+			log.Printf("Failed to generate api key: %v", err)
 			http.Error(w, "failed to generate api key", http.StatusInternalServerError)
 			return
 		}
@@ -337,18 +338,16 @@ func (a *API) HandleKeyByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		keys, err := a.store.ListApiKeys()
+		key, err := a.store.GetApiKeyByID(id)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		for _, k := range keys {
-			if k.ID == id {
-				json.NewEncoder(w).Encode(k)
-				return
-			}
+		if key == nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
 		}
-		http.Error(w, "not found", http.StatusNotFound)
+		json.NewEncoder(w).Encode(key)
 
 	case http.MethodDelete:
 		if err := a.store.DeleteApiKey(id); err != nil {

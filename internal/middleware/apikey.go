@@ -3,6 +3,7 @@ package middleware
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"log"
 	"net/http"
 	"strings"
 
@@ -30,7 +31,11 @@ func validateApiKey(key string, store *store.Store) bool {
 		return false
 	}
 
-	go store.UpdateApiKeyLastUsed(apiKey.ID)
+	go func() {
+		if err := store.UpdateApiKeyLastUsed(apiKey.ID); err != nil {
+			log.Printf("Failed to update API key last_used_at: %v", err)
+		}
+	}()
 	return true
 }
 

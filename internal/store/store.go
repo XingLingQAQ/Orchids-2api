@@ -419,3 +419,26 @@ func (s *Store) DeleteApiKey(id int64) error {
 	}
 	return nil
 }
+
+func (s *Store) GetApiKeyByID(id int64) (*ApiKey, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	key := &ApiKey{}
+	var lastUsedAt sql.NullTime
+	err := s.db.QueryRow(`
+		SELECT id, name, key_prefix, key_suffix, enabled, last_used_at, created_at
+		FROM api_keys WHERE id = ?
+	`, id).Scan(&key.ID, &key.Name, &key.KeyPrefix, &key.KeySuffix, &key.Enabled, &lastUsedAt, &key.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if lastUsedAt.Valid {
+		t := lastUsedAt.Time
+		key.LastUsedAt = &t
+	}
+	return key, nil
+}
