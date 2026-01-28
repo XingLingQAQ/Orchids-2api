@@ -37,6 +37,7 @@ type ApiKey struct {
 	ID         int64      `json:"id"`
 	Name       string     `json:"name"`
 	KeyHash    string     `json:"-"`
+	KeyFull    string     `json:"key_full,omitempty"`
 	KeyPrefix  string     `json:"key_prefix"`
 	KeySuffix  string     `json:"key_suffix"`
 	Enabled    bool       `json:"enabled"`
@@ -91,6 +92,7 @@ func (s *Store) migrate() error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL,
 			key_hash TEXT NOT NULL UNIQUE,
+			key_full TEXT NOT NULL DEFAULT '',
 			key_prefix TEXT NOT NULL DEFAULT 'sk-',
 			key_suffix TEXT NOT NULL,
 			enabled INTEGER DEFAULT 1,
@@ -107,6 +109,9 @@ func (s *Store) migrate() error {
 			return err
 		}
 	}
+
+	// 迁移：为现有表添加 key_full 列
+	s.db.Exec(`ALTER TABLE api_keys ADD COLUMN key_full TEXT NOT NULL DEFAULT ''`)
 
 	return nil
 }
@@ -282,9 +287,9 @@ func (s *Store) CreateApiKey(key *ApiKey) error {
 	defer s.mu.Unlock()
 
 	result, err := s.db.Exec(`
-		INSERT INTO api_keys (name, key_hash, key_prefix, key_suffix, enabled)
-		VALUES (?, ?, ?, ?, ?)
-	`, key.Name, key.KeyHash, key.KeyPrefix, key.KeySuffix, key.Enabled)
+		INSERT INTO api_keys (name, key_hash, key_full, key_prefix, key_suffix, enabled)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, key.Name, key.KeyHash, key.KeyFull, key.KeyPrefix, key.KeySuffix, key.Enabled)
 	if err != nil {
 		return err
 	}
@@ -319,7 +324,7 @@ func (s *Store) ListApiKeys() ([]*ApiKey, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT id, name, key_prefix, key_suffix, enabled, last_used_at, created_at
+		SELECT id, name, key_full, key_prefix, key_suffix, enabled, last_used_at, created_at
 		FROM api_keys ORDER BY id
 	`)
 	if err != nil {
@@ -331,7 +336,7 @@ func (s *Store) ListApiKeys() ([]*ApiKey, error) {
 	for rows.Next() {
 		key := &ApiKey{}
 		var lastUsedAt sql.NullTime
-		if err := rows.Scan(&key.ID, &key.Name, &key.KeyPrefix, &key.KeySuffix, &key.Enabled, &lastUsedAt, &key.CreatedAt); err != nil {
+		if err := rows.Scan(&key.ID, &key.Name, &key.KeyFull, &key.KeyPrefix, &key.KeySuffix, &key.Enabled, &lastUsedAt, &key.CreatedAt); err != nil {
 			return nil, err
 		}
 		if lastUsedAt.Valid {

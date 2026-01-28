@@ -282,6 +282,7 @@ func (a *API) HandleKeys(w http.ResponseWriter, r *http.Request) {
 		key := store.ApiKey{
 			Name:      req.Name,
 			KeyHash:   hashStr,
+			KeyFull:   fullKey,
 			KeyPrefix: "sk-",
 			KeySuffix: fullKey[len(fullKey)-4:],
 			Enabled:   true,

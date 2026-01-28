@@ -28,6 +28,40 @@ docker load -i opus-api.tar
 docker compose up -d
 ```
 
+### 直接运行
+
+```bash
+docker run -d \
+  --name orchids-api \
+  -p 3002:3002 \
+  -v /path/to/data:/app/data \
+  -e ADMIN_USER=admin \
+  -e ADMIN_PASS=your_password \
+  opus-api:latest
+```
+
+### 持久化存储
+
+数据库文件存储在容器内的 `/app/data` 目录，包含：
+- `orchids.db` - SQLite 数据库（账号配置、API Keys 等）
+
+**必须挂载持久卷**以避免数据丢失：
+
+```yaml
+# docker-compose.yml 示例
+services:
+  opus-api:
+    image: opus-api:latest
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./data:/app/data  # 持久化数据目录
+    environment:
+      - ADMIN_USER=admin
+      - ADMIN_PASS=your_password
+      - API_KEYS_ENABLED=true
+```
+
 ### 查看日志
 
 ```bash

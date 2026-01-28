@@ -327,6 +327,10 @@
         color: #22c55e;
         border: 1px dashed rgba(255,255,255,0.2);
       }
+      .key-display:hover {
+        background: rgba(0,0,0,0.5);
+        border-color: rgba(34, 197, 94, 0.5);
+      }
       .warning-box {
         background: rgba(234, 179, 8, 0.1);
         border: 1px solid rgba(234, 179, 8, 0.3);
@@ -745,7 +749,15 @@
         event.target.value = "";
       }
 
-      document.addEventListener("DOMContentLoaded", loadAccounts);
+      document.addEventListener("DOMContentLoaded", () => {
+        // 恢复上次的 Tab 状态
+        const savedTab = localStorage.getItem('activeTab');
+        if (savedTab && (savedTab === 'accounts' || savedTab === 'keys')) {
+          switchTab(savedTab);
+        } else {
+          loadAccounts();
+        }
+      });
 
       // ESC 键关闭模态框
       document.addEventListener('keydown', (e) => {
@@ -763,6 +775,9 @@
 
         document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
         document.getElementById(tabName + 'Tab').classList.add('active');
+
+        // 保存当前 Tab 到 localStorage
+        localStorage.setItem('activeTab', tabName);
 
         if (tabName === 'keys') {
           loadApiKeys();
@@ -803,10 +818,22 @@
               </tr>
             </thead>
             <tbody>
-              ${apiKeys.map(k => `
+              ${apiKeys.map((k, idx) => `
                 <tr>
                   <td>${escapeHtml(k.name)}</td>
-                  <td style="font-family: monospace; color: #a1a1aa;">${k.key_prefix}****...${k.key_suffix}</td>
+                  <td>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span style="cursor: pointer; font-size: 1rem;" data-toggle-key="${idx}" title="显示/隐藏完整 Key">👁</span>
+                      <span style="font-family: monospace; color: #a1a1aa; cursor: pointer;"
+                            data-key-display="${idx}"
+                            data-key-full="${k.key_full || ''}"
+                            data-key-masked="${k.key_prefix}****...${k.key_suffix}"
+                            data-copy-name="${escapeHtml(k.name).replace(/"/g, '&quot;')}"
+                            title="点击复制">
+                        ${k.key_prefix}****...${k.key_suffix}
+                      </span>
+                    </div>
+                  </td>
                   <td>
                     <label class="toggle" style="transform: scale(0.8);">
                       <input type="checkbox" ${k.enabled ? 'checked' : ''} onchange="toggleKeyStatus(${k.id}, this.checked)">
@@ -822,6 +849,38 @@
             </tbody>
           </table>
         `;
+
+        // 绑定眼睛图标点击事件（显示/隐藏）
+        container.querySelectorAll('[data-toggle-key]').forEach(eye => {
+          eye.addEventListener('click', () => {
+            const idx = eye.dataset.toggleKey;
+            const display = container.querySelector(`[data-key-display="${idx}"]`);
+            if (!display) return;
+            const isShowing = display.dataset.showing === 'true';
+            if (isShowing) {
+              display.textContent = display.dataset.keyMasked;
+              display.dataset.showing = 'false';
+              eye.textContent = '👁';
+            } else {
+              display.textContent = display.dataset.keyFull || display.dataset.keyMasked;
+              display.dataset.showing = 'true';
+              eye.textContent = '🙈';
+            }
+          });
+        });
+
+        // 绑定复制按钮事件
+        container.querySelectorAll('[data-key-display]').forEach(span => {
+          span.addEventListener('click', async () => {
+            try {
+              const textToCopy = span.dataset.showing === 'true' ? span.dataset.keyFull : span.dataset.keyFull || span.dataset.keyMasked;
+              await copyToClipboard(textToCopy);
+              showToast(`已复制: ${span.dataset.copyName}`, 'success');
+            } catch (err) {
+              showToast('复制失败', 'error');
+            }
+          });
+        });
 
         // 绑定删除按钮事件
         container.querySelectorAll('[data-delete-key]').forEach(btn => {
@@ -905,11 +964,14 @@
 
       function renderCreatedKeys() {
         const container = document.getElementById('fullKeyDisplay');
-        container.innerHTML = createdKeys.map(k => {
+        container.innerHTML = createdKeys.map((k, i) => {
           if (k.key) {
-            return `<div class="key-display" style="margin-bottom: 8px;">
-              <div style="color: #a1a1aa; font-size: 0.75rem; margin-bottom: 4px;">${escapeHtml(k.name)}</div>
-              <div>${escapeHtml(k.key)}</div>
+            return `<div class="key-display" style="margin-bottom: 8px; cursor: pointer; transition: background 0.2s;" onclick="copySingleKey(${i})" title="点击复制">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: #a1a1aa; font-size: 0.75rem;">${escapeHtml(k.name)}</span>
+                <span style="color: #a1a1aa; font-size: 0.7rem;">点击复制</span>
+              </div>
+              <div style="margin-top: 4px;">${escapeHtml(k.key)}</div>
             </div>`;
           } else {
             return `<div class="key-display" style="margin-bottom: 8px; border-color: #ef4444;">
@@ -917,6 +979,17 @@
             </div>`;
           }
         }).join('');
+      }
+
+      async function copySingleKey(index) {
+        const k = createdKeys[index];
+        if (!k || !k.key) return;
+        try {
+          await copyToClipboard(k.key);
+          showToast(`已复制: ${k.name}`, 'success');
+        } catch (err) {
+          showToast('复制失败', 'error');
+        }
       }
 
       function closeShowKeyModal() {
@@ -932,7 +1005,7 @@
         }
         const text = successKeys.map(k => `${k.name}: ${k.key}`).join('\n');
         try {
-          await navigator.clipboard.writeText(text);
+          await copyToClipboard(text);
           showToast(`已复制 ${successKeys.length} 个 Key`, 'success');
         } catch (err) {
           showToast('复制失败', 'error');
@@ -993,6 +1066,22 @@
         toast.textContent = message;
         container.appendChild(toast);
         setTimeout(() => toast.remove(), 3000);
+      }
+
+      // ========== 复制到剪贴板（兼容非 HTTPS）==========
+      async function copyToClipboard(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const textarea = document.createElement('textarea');
+          textarea.value = text;
+          textarea.style.position = 'fixed';
+          textarea.style.left = '-9999px';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+        }
       }
     </script>
   </body>
