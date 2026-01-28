@@ -6,6 +6,9 @@
 debug-logs
 *.dylib
 orchids-api
+docs/
+.ace-tool
+.claude
 
 # Test binary
 *.test
