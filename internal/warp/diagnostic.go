@@ -32,6 +32,7 @@ type DiagnosticStep struct {
 type DiagnosticResult struct {
 	RefreshTokenSuffix string           `json:"refresh_token_suffix"`
 	ProxyURL           string           `json:"proxy_url,omitempty"`
+	UseUTLS            bool             `json:"use_utls,omitempty"`
 	DeviceID           string           `json:"device_id"`
 	RequestID          string           `json:"request_id"`
 	Model              string           `json:"model"`
@@ -42,6 +43,7 @@ type DiagnosticResult struct {
 type DiagnosticOptions struct {
 	RefreshToken string
 	ProxyURL     string
+	UseUTLS      bool
 	Model        string
 	Prompt       string
 	DeviceID     string
@@ -74,14 +76,15 @@ func RunDiagnostic(ctx context.Context, opts DiagnosticOptions) (*DiagnosticResu
 	}
 
 	sess := getSession(0, refreshToken, opts.DeviceID, opts.RequestID)
-	httpClient := newHTTPClient(0, cfg)
-	authClient := newHTTPClient(0, cfg)
+	httpClient := newDiagnosticHTTPClient(cfg, opts.UseUTLS)
+	authClient := newDiagnosticHTTPClient(cfg, opts.UseUTLS)
 	httpClient.Jar = sess.jar
 	authClient.Jar = sess.jar
 
 	result := &DiagnosticResult{
 		RefreshTokenSuffix: maskTokenSuffix(refreshToken),
 		ProxyURL:           strings.TrimSpace(opts.ProxyURL),
+		UseUTLS:            opts.UseUTLS,
 		DeviceID:           sess.deviceID,
 		RequestID:          sess.requestID,
 		Model:              model,
@@ -103,6 +106,22 @@ func RunDiagnostic(ctx context.Context, opts DiagnosticOptions) (*DiagnosticResu
 	aiStep := runAIStep(ctx, httpClient, jwt, model, promptText, cfg)
 	result.Steps = append(result.Steps, aiStep)
 	return result, nil
+}
+
+func newDiagnosticHTTPClient(cfg *config.Config, useUTLS bool) *http.Client {
+	if !useUTLS {
+		return newHTTPClient(0, cfg)
+	}
+	timeout := defaultRequestTimeout
+	if cfg != nil && cfg.RequestTimeout > 0 {
+		timeout = time.Duration(cfg.RequestTimeout) * time.Second
+	}
+	proxyFunc := util.ProxyFuncFromConfig(cfg)
+	proxyKey := strings.TrimSpace(cfg.ProxyURL)
+	if proxyKey == "" {
+		proxyKey = "direct"
+	}
+	return util.GetSharedUTLSHTTPClient(proxyKey, timeout, proxyFunc)
 }
 
 func runRefreshStep(ctx context.Context, sess *session, client *http.Client, cfg *config.Config) (DiagnosticStep, string, error) {

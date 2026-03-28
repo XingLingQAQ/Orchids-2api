@@ -15,6 +15,7 @@ import (
 func main() {
 	var refreshToken string
 	var proxyURL string
+	var useUTLS bool
 	var model string
 	var prompt string
 	var deviceID string
@@ -23,6 +24,7 @@ func main() {
 
 	flag.StringVar(&refreshToken, "refresh-token", "", "Warp refresh token")
 	flag.StringVar(&proxyURL, "proxy-url", "", "Proxy URL, e.g. http://user:pass@host:port/ or socks5://...")
+	flag.BoolVar(&useUTLS, "utls", false, "Use uTLS Chrome-like TLS fingerprint for diagnostic requests")
 	flag.StringVar(&model, "model", "warp-basic", "Warp model for AI probe")
 	flag.StringVar(&prompt, "prompt", "hello from warpdiag", "Prompt used for AI probe")
 	flag.StringVar(&deviceID, "device-id", "", "Optional fixed device id")
@@ -44,6 +46,7 @@ func main() {
 	result, err := warp.RunDiagnostic(ctx, warp.DiagnosticOptions{
 		RefreshToken: refreshToken,
 		ProxyURL:     proxyURL,
+		UseUTLS:      useUTLS,
 		Model:        model,
 		Prompt:       prompt,
 		DeviceID:     deviceID,
