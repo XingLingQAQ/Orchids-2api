@@ -26,6 +26,7 @@ type DiagnosticStep struct {
 	DurationMS  int64             `json:"duration_ms"`
 	Headers     map[string]string `json:"headers,omitempty"`
 	BodyPreview string            `json:"body_preview,omitempty"`
+	Data        interface{}       `json:"data,omitempty"`
 	Error       string            `json:"error,omitempty"`
 }
 
@@ -102,6 +103,12 @@ func RunDiagnostic(ctx context.Context, opts DiagnosticOptions) (*DiagnosticResu
 	if err != nil {
 		return result, nil
 	}
+
+	modelChoicesStep := runModelChoicesStep(ctx, authClient, jwt, cfg)
+	result.Steps = append(result.Steps, modelChoicesStep)
+
+	limitInfoStep := runLimitInfoStep(ctx, authClient, jwt, cfg)
+	result.Steps = append(result.Steps, limitInfoStep)
 
 	aiStep := runAIStep(ctx, httpClient, jwt, model, promptText, cfg)
 	result.Steps = append(result.Steps, aiStep)
@@ -239,12 +246,75 @@ func runLoginStep(ctx context.Context, sess *session, client *http.Client, jwt s
 		return finishDiagnosticStep(step, start), &HTTPStatusError{Operation: "login", StatusCode: resp.StatusCode}
 	}
 
+	step.Data = map[string]interface{}{
+		"cookie_names": cookieNamesForURL(client, warpAPIBaseURL),
+	}
+
 	sess.mu.Lock()
 	sess.loggedIn = true
 	sess.lastLogin = time.Now()
 	sess.mu.Unlock()
 	step.OK = true
 	return finishDiagnosticStep(step, start), nil
+}
+
+func runModelChoicesStep(ctx context.Context, client *http.Client, jwt string, cfg *config.Config) DiagnosticStep {
+	step := DiagnosticStep{Name: "model_choices", Target: warpGraphQLV2URL}
+	step.Proxy = resolveDiagnosticProxy(cfg, warpGraphQLV2URL)
+	start := time.Now()
+
+	agentChoices, defaultID, agentErr := fetchUserAgentModeLLMChoices(ctx, client, jwt)
+	workspaceChoices, workspaceErr := fetchWorkspaceAvailableLLMChoices(ctx, client, jwt)
+
+	if agentErr != nil && workspaceErr != nil && len(agentChoices) == 0 && len(workspaceChoices) == 0 {
+		step.Error = fmt.Sprintf("agent_mode: %v; workspace: %v", agentErr, workspaceErr)
+		return finishDiagnosticStep(step, start)
+	}
+
+	merged := mergeWarpModelChoices(defaultID, agentChoices, workspaceChoices)
+	items := make([]map[string]string, 0, len(merged))
+	for _, choice := range merged {
+		items = append(items, map[string]string{
+			"id":   choice.ID,
+			"name": choice.Name,
+		})
+	}
+
+	step.OK = true
+	step.Data = map[string]interface{}{
+		"default_id":       defaultID,
+		"agent_mode_count": len(agentChoices),
+		"workspace_count":  len(workspaceChoices),
+		"choices":          items,
+	}
+	if agentErr != nil || workspaceErr != nil {
+		step.BodyPreview = summarizeWarpErrorBody(fmt.Sprintf("agent_mode_err=%v workspace_err=%v", agentErr, workspaceErr))
+	}
+	return finishDiagnosticStep(step, start)
+}
+
+func runLimitInfoStep(ctx context.Context, client *http.Client, jwt string, cfg *config.Config) DiagnosticStep {
+	step := DiagnosticStep{Name: "request_limit_info", Target: warpGraphQLV2URL}
+	step.Proxy = resolveDiagnosticProxy(cfg, warpGraphQLV2URL)
+	start := time.Now()
+
+	info, bonuses, err := fetchRequestLimitInfo(ctx, client, jwt)
+	if err != nil {
+		step.Error = err.Error()
+		return finishDiagnosticStep(step, start)
+	}
+
+	step.OK = true
+	step.Data = map[string]interface{}{
+		"plan_name":     info.PlanName,
+		"plan_tier":     info.PlanTier,
+		"request_limit": info.RequestLimit,
+		"used":          info.RequestsUsedSinceLastRefresh,
+		"remaining":     info.Remaining,
+		"is_unlimited":  info.IsUnlimited,
+		"bonus_count":   len(bonuses),
+	}
+	return finishDiagnosticStep(step, start)
 }
 
 func runAIStep(ctx context.Context, client *http.Client, jwt, model, promptText string, cfg *config.Config) DiagnosticStep {
@@ -336,4 +406,32 @@ func maskTokenSuffix(token string) string {
 		return token
 	}
 	return "..." + token[len(token)-12:]
+}
+
+func cookieNamesForURL(client *http.Client, rawURL string) []string {
+	if client == nil || client.Jar == nil {
+		return nil
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil
+	}
+	cookies := client.Jar.Cookies(u)
+	if len(cookies) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(cookies))
+	seen := make(map[string]struct{}, len(cookies))
+	for _, cookie := range cookies {
+		name := strings.TrimSpace(cookie.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
 }

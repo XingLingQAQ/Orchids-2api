@@ -473,8 +473,10 @@ func (h *Handler) writeDuplicateResponse(w http.ResponseWriter, req ClaudeReques
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 
-		msgStart, _ := marshalSSEMessageStartNoUsageBytes("dup", req.Model)
+		msgStart, _ := marshalSSEMessageStartBytes("dup", req.Model, 0, 0)
+		msgDelta, _ := appendSSEMessageDelta(make([]byte, 0, 96), "end_turn", 0)
 		_ = writeSSEFrameBytes(w, "message_start", msgStart)
+		_ = writeSSEFrameBytes(w, "message_delta", msgDelta)
 		_ = writeSSEFrameBytes(w, "message_stop", sseMessageStopBytes)
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
@@ -507,17 +509,31 @@ func (h *Handler) writeDuplicateResponse(w http.ResponseWriter, req ClaudeReques
 		return
 	}
 	if err := json.NewEncoder(w).Encode(struct {
-		Type     string `json:"type"`
-		Deduped  bool   `json:"deduped"`
-		Message  string `json:"message"`
-		Model    string `json:"model"`
-		Streamed bool   `json:"streamed"`
+		ID           string                 `json:"id"`
+		Type         string                 `json:"type"`
+		Role         string                 `json:"role"`
+		Content      []map[string]any       `json:"content"`
+		Model        string                 `json:"model"`
+		StopReason   string                 `json:"stop_reason"`
+		StopSequence interface{}            `json:"stop_sequence"`
+		Usage        map[string]int         `json:"usage"`
+		Metadata     map[string]interface{} `json:"metadata,omitempty"`
 	}{
-		Type:     "duplicate_request",
-		Deduped:  true,
-		Message:  "duplicate request suppressed",
-		Model:    req.Model,
-		Streamed: false,
+		ID:           "dup",
+		Type:         "message",
+		Role:         "assistant",
+		Content:      []map[string]any{},
+		Model:        req.Model,
+		StopReason:   "end_turn",
+		StopSequence: nil,
+		Usage: map[string]int{
+			"input_tokens":  0,
+			"output_tokens": 0,
+		},
+		Metadata: map[string]interface{}{
+			"deduped": true,
+			"message": "duplicate request suppressed",
+		},
 	}); err != nil {
 		slog.Error("Failed to write duplicate response", "error", err)
 	}
