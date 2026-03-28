@@ -371,6 +371,10 @@ func (h *Handler) finishRequest(hash string) {
 	h.dedupStore.Finish(context.Background(), hash)
 }
 
+func (h *Handler) abortRequest(hash string) {
+	h.dedupStore.Abort(context.Background(), hash)
+}
+
 func stainlessRetryCount(r *http.Request) int {
 	if r == nil {
 		return 0
@@ -605,6 +609,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	registeredKeys := []string{}
+	keepDedupWindow := true
 	if !bypassDedup {
 		exactKey := "exact:" + reqHash
 		if dup, inFlight := h.registerRequest(exactKey); dup {
@@ -665,7 +670,11 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() {
 		for i := len(registeredKeys) - 1; i >= 0; i-- {
-			h.finishRequest(registeredKeys[i])
+			if keepDedupWindow {
+				h.finishRequest(registeredKeys[i])
+			} else {
+				h.abortRequest(registeredKeys[i])
+			}
 		}
 	}()
 
@@ -775,6 +784,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 
 	apiClient, currentAccount, err := h.selectAccount(r.Context(), targetChannel, forcedChannel != "", failedAccountIDs)
 	if err != nil {
+		keepDedupWindow = false
 		slog.Error("selectAccount failed", "error", err, "channel", targetChannel)
 		logger.LogEarlyExit("select_account_failed", map[string]interface{}{
 			"error":   err.Error(),
@@ -867,6 +877,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		var err error
 		boltProjectID, err = h.resolveBoltProjectID(r.Context(), currentAccount, apiClient, effectiveWorkdir, freshBoltTask)
 		if err != nil {
+			keepDedupWindow = false
 			apperrors.New("api_error", "Failed to initialize bolt project: "+err.Error(), http.StatusBadGateway).WriteResponse(w)
 			return
 		}
@@ -1390,6 +1401,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 
 			if !errClass.Retryable {
 				slog.Error("Aborting retries for non-retriable error", "error", err, "category", errClass.Category)
+				keepDedupWindow = false
 				if errClass.Category == "auth_blocked" || errClass.Category == "auth" {
 					sh.InjectAuthError(errClass.Category, errStr)
 				} else if errClass.Category != "canceled" {
@@ -1403,11 +1415,13 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if r.Context().Err() != nil {
+				keepDedupWindow = false
 				sh.setSuppressEmptyOutputFallback(true)
 				sh.finishResponse("end_turn")
 				return
 			}
 			if retriesRemaining <= 0 {
+				keepDedupWindow = false
 				if currentAccount != nil && h.loadBalancer != nil {
 					slog.Error("Account request failed, max retries reached", "account", currentAccount.Name)
 				}
@@ -1472,6 +1486,7 @@ func (h *Handler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 						)
 					} else {
 						slog.Error("No more accounts available", "error", retryErr)
+						keepDedupWindow = false
 						sh.InjectNoAvailableAccountError(errStr, retryErr)
 						sh.finishResponse("end_turn")
 						return
