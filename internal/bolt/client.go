@@ -34,7 +34,7 @@ const (
 	defaultRateLimitsURL    = "https://bolt.new/api/rate-limits/user"
 	defaultTeamsRateURL     = "https://bolt.new/api/rate-limits/teams"
 	defaultProjectsURL      = "https://stackblitz.com/api/projects/sb1/fork"
-	defaultAdapterPrompt    = "你正在通过 Orchids 的 Bolt 适配层转发对话。若已有上下文足够就直接回答；只有在当前请求确实需要已声明的工具时才返回 JSON 工具调用，不要先解释计划。"
+	defaultAdapterPrompt    = "保持回答自然、直接、贴合用户问题；有足够上下文时直接回答，只有在当前请求确实需要已声明工具时才调用工具。"
 	maxBoltFocusedFileCount = 2
 	maxBoltReadResultRunes  = 480
 	maxBoltFocusedReadRunes = 2200
@@ -560,7 +560,7 @@ func shouldSkipBoltMessage(role string) bool {
 
 func buildSystemPromptParts(system []prompt.SystemItem, workdir string, tools []interface{}, noTools bool, messages []prompt.Message) systemPromptParts {
 	parts := systemPromptParts{
-		BasePrompt: defaultAdapterPrompt,
+		BasePrompt: buildBoltBasePrompt(tools, noTools, messages),
 		ToolPrompt: buildBoltToolPrompt(workdir, tools, noTools, messages),
 	}
 
@@ -581,6 +581,30 @@ func buildSystemPromptParts(system []prompt.SystemItem, workdir string, tools []
 	}
 	parts.FullPrompt = strings.Join(combined, "\n\n")
 	return parts
+}
+
+func buildBoltBasePrompt(tools []interface{}, noTools bool, messages []prompt.Message) string {
+	base := []string{defaultAdapterPrompt}
+
+	if noTools {
+		base = append(base, "本回合禁止调用工具，只基于现有上下文直接回答。")
+		return strings.Join(base, "\n")
+	}
+
+	toolNames := supportedBoltToolNames(tools)
+	if shouldUseBoltCodingToolGuidance(toolNames, messages) {
+		base = append(base,
+			"如果当前请求本质上是代码或文件修改任务，在需要工具时直接进入执行，不要把回答写成空泛计划或重复现状总结。",
+			"如果不是代码修改任务，保持普通助手式回答，不要主动暴露运行环境、适配层或额外工作流说明。",
+		)
+		return strings.Join(base, "\n")
+	}
+
+	base = append(base,
+		"如果问题是知识问答、实时信息、解释、翻译或普通聊天，优先像正常助手一样自然回答。",
+		"除非完成当前问题必须依赖工具，否则不要把回答写成工具规划、执行说明或环境说明。",
+	)
+	return strings.Join(base, "\n")
 }
 
 func buildBoltMessages(messages []prompt.Message, workdir string) builtMessages {
