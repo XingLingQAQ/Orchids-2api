@@ -1290,14 +1290,18 @@ func hasBoltToolName(toolNames []string, want string) bool {
 
 func buildBoltHistoryRecoveryPrompt(workdir string, messages []prompt.Message) []string {
 	invalidPath := detectRecentInvalidBoltHistoryPath(messages)
+	suggestedPath := detectRecentBoltPathSuggestion(messages)
 	missingPaths := detectMissingWorkspaceHistoryPaths(messages, workdir)
-	if invalidPath == "" && len(missingPaths) == 0 {
+	if invalidPath == "" && suggestedPath == "" && len(missingPaths) == 0 {
 		return nil
 	}
 
-	parts := make([]string, 0, 6)
+	parts := make([]string, 0, 7)
 	if invalidPath != "" {
 		parts = append(parts, "历史里刚出现过无效外部路径 `"+invalidPath+"`；它不在当前项目中，不要复用这个路径。")
+	}
+	if suggestedPath != "" {
+		parts = append(parts, "工具结果刚明确提示应使用 `"+suggestedPath+"` 这个项目内路径；后续 Read/Edit/Write 必须直接复用这个精确路径，不要把它退化成 `.`、目录名或去掉扩展名后的别名。")
 	}
 	if strings.TrimSpace(workdir) != "" {
 		parts = append(parts, "真实项目目录是 `"+workdir+"`。")
@@ -1307,6 +1311,61 @@ func buildBoltHistoryRecoveryPrompt(workdir string, messages []prompt.Message) [
 	}
 	parts = append(parts, "重新检查项目时用 `.`、README.md、go.mod、package.json 这类项目内相对路径；在至少成功查看一次 `.`、README.md、go.mod、package.json 等项目内路径之前，不要回答“项目为空”。")
 	return parts
+}
+
+func detectRecentBoltPathSuggestion(messages []prompt.Message) string {
+	if len(messages) == 0 {
+		return ""
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		for _, block := range normalizeBlocks(messages[i]) {
+			if !strings.EqualFold(strings.TrimSpace(block.Type), "tool_result") {
+				continue
+			}
+			if suggested := extractBoltSuggestedPath(stringifyContent(block.Content)); suggested != "" {
+				return suggested
+			}
+		}
+	}
+	return ""
+}
+
+func extractBoltSuggestedPath(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	lower := strings.ToLower(text)
+	marker := "did you mean "
+	idx := strings.Index(lower, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(text[idx+len(marker):])
+	if rest == "" {
+		return ""
+	}
+	end := len(rest)
+	for i, r := range rest {
+		switch r {
+		case '?', '\n', '\r', '\t':
+			end = i
+			goto found
+		}
+	}
+found:
+	candidate := strings.Trim(rest[:end], "\"'`.,;:()[]{}")
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return ""
+	}
+	if candidate == "." || candidate == ".." {
+		return ""
+	}
+	if looksLikeInvalidBoltPath(candidate) {
+		return ""
+	}
+	return candidate
 }
 
 func trimBoltMessagesForMissingWorkspaceTargets(messages []prompt.Message, workdir string) []prompt.Message {
