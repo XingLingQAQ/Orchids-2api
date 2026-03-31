@@ -527,6 +527,8 @@ func prepareRequest(req upstream.UpstreamRequest, projectID string) (*Request, I
 	req.Messages = trimBoltMessagesAfterSupersededEmptyProjectClarification(req.Messages)
 	req.Messages = trimBoltMessagesAfterSupersededInjectedFailure(req.Messages)
 	req.Messages = trimBoltMessagesAfterSupersededExplorationDetour(req.Messages)
+	req.Messages = trimBoltMessagesAfterSupersededFakeToolJSON(req.Messages)
+	req.Messages = trimBoltMessagesAfterSupersededReadyForTaskPrompt(req.Messages)
 	req.Messages = trimBoltMessagesAfterSupersededAssistantCompletion(req.Messages)
 	req.Messages = trimBoltMessagesAfterSupersededReadFollowup(req.Messages)
 	req.Messages = trimBoltMessagesAfterSupersededSuccessfulMutation(req.Messages)
@@ -2843,6 +2845,130 @@ func isBoltExplorationFollowupAssistantMessage(msg prompt.Message) bool {
 		"我已准备好继续工作。请告诉我你需要完成的任务",
 		"please tell me what you want to do",
 		"tell me what you need to do",
+	} {
+		if strings.Contains(text, strings.ToLower(marker)) {
+			return true
+		}
+	}
+	return false
+}
+
+func trimBoltMessagesAfterSupersededFakeToolJSON(messages []prompt.Message) []prompt.Message {
+	if len(messages) < 3 {
+		return messages
+	}
+
+	drop := make([]bool, len(messages))
+	dropped := false
+	for i := 0; i < len(messages); i++ {
+		if !isBoltFakeToolJSONAssistantMessage(messages[i]) {
+			continue
+		}
+		nextUserIdx := nextBoltStandaloneUserMessageIndex(messages, i+1)
+		if nextUserIdx < 0 {
+			continue
+		}
+		if !textIndicatesBoltCodeModification(extractBoltStandaloneUserText(messages[nextUserIdx])) {
+			continue
+		}
+		drop[i] = true
+		dropped = true
+	}
+
+	if !dropped {
+		return messages
+	}
+
+	trimmed := make([]prompt.Message, 0, len(messages))
+	for i, msg := range messages {
+		if !drop[i] {
+			trimmed = append(trimmed, msg)
+		}
+	}
+	return trimmed
+}
+
+func isBoltFakeToolJSONAssistantMessage(msg prompt.Message) bool {
+	if !strings.EqualFold(strings.TrimSpace(msg.Role), "assistant") {
+		return false
+	}
+	text := strings.TrimSpace(extractBoltAssistantHistoryContent(normalizeBlocks(msg)))
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+	if !strings.Contains(lower, `"tool"`) && !strings.Contains(lower, `"tool_calls"`) {
+		return false
+	}
+	if !(strings.Contains(lower, `"edit"`) || strings.Contains(lower, `"write"`) || strings.Contains(lower, `"read"`)) {
+		return false
+	}
+	return strings.HasPrefix(text, "{") && strings.Contains(text, `"parameters"`)
+}
+
+func trimBoltMessagesAfterSupersededReadyForTaskPrompt(messages []prompt.Message) []prompt.Message {
+	if len(messages) < 4 {
+		return messages
+	}
+
+	toolUses := collectBoltToolUseMetadata(messages)
+	drop := make([]bool, len(messages))
+	dropped := false
+	for i := 0; i < len(messages); i++ {
+		if !isBoltReadyForTaskAssistantMessage(messages[i]) {
+			continue
+		}
+
+		prevIdx := previousBoltVisibleMessageIndex(messages, i-1)
+		if prevIdx < 0 {
+			continue
+		}
+		prevSummary := summarizeBoltToolResultOnlyMessage(messages[prevIdx], toolUses)
+		if !prevSummary.IsToolResultOnly || len(prevSummary.ReadAliases) == 0 {
+			continue
+		}
+
+		nextUserIdx := nextBoltStandaloneUserMessageIndex(messages, i+1)
+		if nextUserIdx < 0 {
+			continue
+		}
+		nextTask := strings.TrimSpace(extractBoltStandaloneUserText(messages[nextUserIdx]))
+		if !textIndicatesBoltCodeModification(nextTask) {
+			continue
+		}
+
+		drop[i] = true
+		dropped = true
+	}
+
+	if !dropped {
+		return messages
+	}
+
+	trimmed := make([]prompt.Message, 0, len(messages))
+	for i, msg := range messages {
+		if !drop[i] {
+			trimmed = append(trimmed, msg)
+		}
+	}
+	return trimmed
+}
+
+func isBoltReadyForTaskAssistantMessage(msg prompt.Message) bool {
+	if !strings.EqualFold(strings.TrimSpace(msg.Role), "assistant") {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(extractBoltAssistantHistoryContent(normalizeBlocks(msg))))
+	if text == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"我准备好了。请提供你需要完成的任务",
+		"我准备好了。请告诉我你想要做什么",
+		"我已准备好帮助你。请告诉我你需要做什么",
+		"我会直接对 `output.txt` 进行操作",
+		"please provide the task you need completed",
+		"tell me what you want to do",
 	} {
 		if strings.Contains(text, strings.ToLower(marker)) {
 			return true

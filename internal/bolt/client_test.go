@@ -4461,6 +4461,69 @@ func TestPrepareRequest_TrimsSupersededExplorationDetourBeforeFocusedMutation(t 
 	}
 }
 
+func TestPrepareRequest_TrimsFakeToolJSONAndReadyPromptBeforeRepeatedMutation(t *testing.T) {
+	req := upstream.UpstreamRequest{
+		Model: "claude-sonnet-4-6",
+		Tools: []interface{}{
+			map[string]interface{}{"name": "Read"},
+			map[string]interface{}{"name": "Edit"},
+			map[string]interface{}{"name": "Write"},
+			map[string]interface{}{"name": "Glob"},
+		},
+		Messages: []prompt.Message{
+			{Role: "user", Content: prompt.MessageContent{Text: "帮我在output文件中添加 我是大帅比123123"}},
+			{
+				Role: "assistant",
+				Content: prompt.MessageContent{Text: "{\n  \"tool\": \"Edit\",\n  \"parameters\": {\n    \"file_path\": \"output.txt\",\n    \"old_string\": \"我是大帅比123123\",\n    \"new_string\": \"我是大帅比123123\\n新增内容\"\n  }\n}"},
+			},
+			{Role: "user", Content: prompt.MessageContent{Text: "帮我在output文件中添加 我是大帅比123123"}},
+			{
+				Role: "assistant",
+				Content: prompt.MessageContent{
+					Blocks: []prompt.ContentBlock{{
+						Type:  "tool_use",
+						ID:    "tool_read",
+						Name:  "Read",
+						Input: map[string]interface{}{"file_path": "output.txt"},
+					}},
+				},
+			},
+			{
+				Role: "user",
+				Content: prompt.MessageContent{
+					Blocks: []prompt.ContentBlock{{
+						Type:      "tool_result",
+						ToolUseID: "tool_read",
+						Content:   "1\t123123\n",
+					}},
+				},
+			},
+			{
+				Role: "assistant",
+				Content: prompt.MessageContent{Text: "我准备好了。请提供你需要完成的任务，我会直接对 `output.txt` 进行操作。"},
+			},
+			{Role: "user", Content: prompt.MessageContent{Text: "帮我在output文件中添加 我是大帅比123123"}},
+		},
+	}
+
+	boltReq, _ := prepareRequest(req, "sb1-demo")
+	all := make([]string, 0, len(boltReq.Messages))
+	for _, msg := range boltReq.Messages {
+		all = append(all, msg.Content)
+	}
+	joined := strings.Join(all, "\n")
+	if strings.Contains(joined, `"tool": "Edit"`) {
+		t.Fatalf("expected fake tool json assistant text to be trimmed, got: %q", joined)
+	}
+	if strings.Contains(joined, "我准备好了。请提供你需要完成的任务") {
+		t.Fatalf("expected ready-for-task assistant text to be trimmed, got: %q", joined)
+	}
+	last := boltReq.Messages[len(boltReq.Messages)-1].Content
+	if !strings.Contains(last, "帮我在output文件中添加 我是大帅比123123") {
+		t.Fatalf("expected latest mutation task to remain, got: %q", last)
+	}
+}
+
 func TestPrepareRequest_AdvertisesWebToolsWhenDeclared(t *testing.T) {
 	req := upstream.UpstreamRequest{
 		Model:    "claude-sonnet-4-6",
